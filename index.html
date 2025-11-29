@@ -3,33 +3,34 @@
 <head>
 <meta charset="UTF-8">
 <title>Neon Hangman Online</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  body { margin:0; height:100vh; background:#0f0f1e; color:#0ff; font-family:'Segoe UI,sans-serif;
+  body { margin:0; height:100vh; background:#0a0a1a; color:#0ff; font-family:system-ui,sans-serif;
          display:flex; justify-content:center; align-items:center; overflow:hidden; }
-  .game { width:90%; max-width:520px; padding:2rem; background:rgba(20,20,40,0.95);
-          border-radius:20px; box-shadow:0 0 0 60px #0ff; text-align:center; }
-  h1 { margin:0 0 1rem; font-size:3rem; text-shadow:0 0 25px #0ff; }
-  input, button { font-family:inherit; }
-  #code { padding:1rem 2rem; font-size:1.8rem; width:220px; text-align:center; background:#000;
-          border:3px solid #0ff; color:#0ff; border-radius:15px; box-shadow:0 0 30px #0ff;
-          text-transform:uppercase; margin:1rem 0; }
-  .btn { background:#0ff; color:#000; padding:1rem 2.5rem; margin:0.8rem; font-size:1.6rem;
-          border:none; border-radius:15px; cursor:pointer; box-shadow:0 0 30px #0ff; font-weight:bold; }
-  .btn:hover { transform:scale(1.07); }
-  .hangman { width:180px; height:220px; margin:2rem auto; }
-  .word { font-size:3.5rem; letter-spacing:0.9rem; margin:1.5rem 0; font-weight:bold; }
-  .letter { display:inline-block; min-width:55px; }
-  #message { font-size:1.8rem; min-height:2.5rem; margin:1rem 0; }
-  .keyboard { display:flex; flex-wrap:wrap; justify-content:center; gap:11px; margin:2rem 0; }
-  .key { width:52px; height:52px; background:none; border:3px solid #0ff; color:#0ff;
-          border-radius:15px; font-size:1.8rem; cursor:pointer; box-shadow:0 0 20px #0ff; }
+  .game { width:95%; max-width:460px; padding:1.5px 20px 30px; background:rgba(15,15,40,0.95);
+          border-radius:25px; box-shadow:0 0 60px #0ff; text-align:center; }
+  h1 { margin:10px 0 20px; font-size:2.8rem; text-shadow:0 0 20px #0ff; }
+  input#code { padding:14px; font-size:1.8rem; width:200px; text-align:center; background:#000;
+               border:3px solid #0ff; color:#0ff; border-radius:15px; box-shadow:0 0 25px #0ff;
+               text-transform:uppercase; margin:15px 0; }
+  .btn { background:#0ff; color:#000; padding:14px 30px; margin:10px; font-size:1.5rem;
+          border:none; border-radius:15px; cursor:pointer; font-weight:bold; box-shadow:0 0 30px #0ff; }
+  .btn:hover { transform:scale(1.08); }
+  .hangman { width:170px; height:210px; margin:20px auto; }
+  .word { font-size:3.4rem; letter-spacing:0.9rem; margin:20px 0; font-weight:bold; }
+  .letter { display:inline-block; min-width:50px; }
+  #message { font-size:1.7rem; min-height:50px; margin:15px 0; }
+  .keyboard { display:flex; flex-wrap:wrap; justify-content:center; gap:10px; margin:25px 0; }
+  .key { width:48px; height:48px; background:none; border:3px solid #0ff; color:#0ff;
+          border-radius:14px; font-size:1.7rem; cursor:pointer; box-shadow:0 0 18px #0ff; font-weight:bold; }
   .key:hover:not(:disabled) { background:#0ff; color:#000; }
-  .key:disabled { opacity:0.4; }
+  .key:disabled { opacity:0.3; }
+  #chatBox { height:140px; overflow-y:auto; background:#000; border:2px solid #0ff;
+             border-radius:12px; padding:12px; margin:20px 0; text-align:left; font-size:1rem;
+             scrollbar-width:thin; scrollbar-color:#0ff #000; }
+  #chatInput { width:68%; padding:12px; background:#000; border:2px solid #0ff; color:#0ff;
+                border-radius:12px; font-size:1rem; }
   .part { display:none; }
-  #chat { height:180px; overflow-y:auto; background:#000; border:2px solid #0ff;
-           border-radius:12px; padding:1rem; margin:1.5rem 0; text-align:left; font-size:1.1rem; }
-  #chatMsg { width:70%; padding:0.8rem; background:#000; border:2px solid #0ff; color:#0ff;
-              border-radius:12px; }
   #menu, #gameArea { width:100%; }
   #gameArea { display:none; }
 </style>
@@ -37,7 +38,7 @@
 <body>
 
 <div class="game">
-  <h1>Neon Hangman Online</h1>
+  <h1>Neon Hangman</h1>
 
   <div id="menu">
     <input type="text" id="code" placeholder="GAME CODE" maxlength="6">
@@ -67,18 +68,18 @@
 
     <div class="keyboard" id="keyboard"></div>
 
-    <div id="chat"></div>
-    <input type="text" id="chatMsg" placeholder="Type a message..." maxlength="100"
-           onkeypress="if(event.key==='Enter')sendChat()">
-    <button class="btn" style="width:80px" onclick="sendChat()">Send</button>
+    <div id="chatBox"></div>
+    <input type="text" id="chatInput" placeholder="Chat..." maxlength="120"
+           onkeypress="if(event.key==='Enter')sendMessage()">
+    <button class="btn" onclick="sendMessage()">Send</button>
 
     <br><br>
     <button class="btn" onclick="location.reload()">New Game</button>
   </div>
 </div>
 
-<script src="https://www.gstatic.com/firebasejs/10.7.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 
 <script>
 const firebaseConfig = {
@@ -94,20 +95,20 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 
 let gameCode = "";
-let role = ""; // "host" = guesser, "guest" = word setter
+let isHost = false;
 
 function createGame() {
-  gameCode = Math.random().toString(36).substr(2,6).toUpperCase();
+  gameCode = Math.random().toString(36).substring(2,8).toUpperCase();
   document.getElementById("code").value = gameCode;
-  alert("Share this code:\n" + gameCode);
-  role = "host";
+  isHost = true;
+  alert("Share this code with your friend:\n\n" + gameCode);
   startGame();
 }
 
 function joinGame() {
   gameCode = document.getElementById("code").value.trim().toUpperCase();
-  if (!gameCode) return alert("Enter code!");
-  role = "guest";
+  if (gameCode.length !== 6) return alert("Enter 6-letter code!");
+  isHost = false;
   startGame();
 }
 
@@ -117,48 +118,48 @@ function startGame() {
 
   const gameRef = db.collection("games").doc(gameCode);
 
-  // Guest immediately sets the word
-  if (role === "guest") {
-    const w = prompt("Enter the secret word (3–12 letters):")?.trim().toUpperCase();
-    if (/^[A-Z]{3,12}$/.test(w)) {
-      gameRef.set({
-        word: w,
-        guessed: Array(w.length).fill(false),
-        wrongs: 0,
-        messages: [{text: "Game started! Word is set.", time: Date.now()}]
-      });
-      addChat("Word set! Your friend can start guessing.");
-    } else {
+  if (isHost) {
+    gameRef.set({ status: "waiting", messages: [] });
+    addChat("Waiting for friend to join and set word...");
+  } else {
+    // Guest sets the word immediately
+    const word = prompt("Enter secret word (3-12 letters only):")?.trim().toUpperCase();
+    if (!/^[A-Z]{3,12}$/.test(word)) {
       alert("Invalid word!");
       location.reload();
+      return;
     }
-  } else {
-    // Host just waits
-    gameRef.set({ messages: [] }, { merge: true });
-    addChat("Waiting for friend to set the word...");
+    gameRef.set({
+      word: word,
+      guessed: Array(word.length).fill(false),
+      wrongs: 0,
+      status: "playing",
+      messages: [{text: "Word set! Start guessing!", time: Date.now()}]
+    });
+    addChat("Word set! Your friend can start guessing");
   }
 
-  // Listen to everything
+  // Listen to game state
   gameRef.onSnapshot(doc => {
     if (!doc.exists) return;
-    const d = doc.data();
-    if (d.word) renderGame(d);
-    if (d.messages) renderChat(d.messages);
+    const data = doc.data();
+    if (data.word) updateGame(data);
+    if (data.messages) updateChat(data.messages);
   });
 }
 
-function renderGame(data) {
+function updateGame(data) {
   // Word
-  const wordDiv = document.getElementById("word");
-  wordDiv.innerHTML = "";
-  for (let i = 0; i < data.word.length; i++) {
+  const w = document.getElementById("word");
+  w.innerHTML = "";
+  for (let i=0; i<data.word.length; i++) {
     const s = document.createElement("span");
     s.className = "letter";
     s.textContent = data.guessed[i] ? data.word[i] : "_";
-    wordDiv.appendChild(s);
+    w.appendChild(s);
   }
 
-  // Hangman
+  // Hangman drawing
   document.querySelectorAll(".part").forEach((p,i) => {
     p.style.display = i < data.wrongs ? "block" : "none";
   });
@@ -175,60 +176,62 @@ function renderGame(data) {
     kb.appendChild(btn);
   });
 
-  // Win/lose
+  // Win/lose message
   if (data.guessed.every(Boolean)) {
-    document.getElementById("message").innerHTML = "YOU WIN!";
+    document.getElementById("message").innerHTML = "WINNER!";
   } else if (data.wrongs >= 6) {
-    document.getElementById("message").innerHTML = `Game Over! Word was: <span style="color:#0f0">${data.word}</span>`;
+    document.getElementById("message").innerHTML = `Game Over!<br>Word was: <span style="color:#0f0">${data.word}</span>`;
   }
 }
 
 function guess(letter) {
-  if (role !== "host") return;
-  db.collection("games").doc(gameCode).get().then(doc => {
+  if (!isHost) return; // only host guesses
+  const gameRef = db.collection("games").doc(gameCode);
+  gameRef.get().then(doc => {
     const d = doc.data();
-    let guessed = d.guessed.slice();
-    let wrongs = d.wrongs;
+    let newGuessed = d.guessed.slice();
+    let newWrongs = d.wrongs;
     let found = false;
-    for (let i = 0; i < d.word.length; i++) {
-      if (d.word[i] === letter) { guessed[i] = true; found = true; }
+    for (let i=0; i<d.word.length; i++) {
+      if (d.word[i] === letter) { newGuessed[i] = true; found = true; }
     }
-    if (!found) wrongs++;
-    db.collection("games").doc(gameCode).update({ guessed, wrongs });
+    if (!found) newWrongs++;
+    gameRef.update({ guessed: newGuessed, wrongs: newWrongs });
   });
 }
 
-function sendChat() {
-  const input = document.getElementById("chatMsg");
+function sendMessage() {
+  const input = document.getElementById("chatInput");
   const text = input.value.trim();
   if (!text) return;
   db.collection("games").doc(gameCode).update({
     messages: firebase.firestore.FieldValue.arrayUnion({
       text: text,
-      time: Date.now(),
-      sender: role === "host" ? "You" : role
+      sender: isHost ? "Host" : "Guest",
+      time: Date.now()
     })
   });
   input.value = "";
 }
 
-function addChat(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  document.getElementById("chat").appendChild(div);
-  div.scrollIntoView();
-}
-
-function renderChat(messages) {
-  const chat = document.getElementById("chat");
-  chat.innerHTML = "";
+function updateChat(messages) {
+  const box = document.getElementById("chatBox");
+  box.innerHTML = "";
   messages.forEach(m => {
     const div = document.createElement("div");
     div.textContent = m.text;
-    div.style.margin = "4px 0";
-    chat.appendChild(div);
+    div.style.margin = "6px 0";
+    box.appendChild(div);
   });
-  chat.scrollTop = chat.scrollHeight;
+  box.scrollTop = box.scrollHeight;
+}
+
+function addChat(text) {
+  const box = document.getElementById("chatBox");
+  const div = document.createElement("div");
+  div.textContent = text;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
 }
 </script>
 </body>
