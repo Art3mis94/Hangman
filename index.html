@@ -15,6 +15,8 @@
             --neon-color: #0ff;
             --text-color: #0ff;
             --shadow: 0 0 30px var(--neon-color);
+            --neon-green: #0f0;
+            --neon-red: #f00;
         }
 
         body {
@@ -104,10 +106,16 @@
         }
 
         #message {
-            font-size: 1.6rem;
+            font-size: 1.3rem;
             min-height: 50px;
-            margin: 15px 0;
+            margin: 15px 0 25px;
             color: var(--text-color);
+            line-height: 1.5;
+        }
+        
+        #rematchMessage {
+            font-size: 1.2rem;
+            margin: 10px 0;
         }
 
         .keyboard {
@@ -187,6 +195,7 @@
 
 <div class="game-container">
     <h1>Neon Hangman</h1>
+    <div id="playerRole" style="font-size: 1rem; margin-bottom: 10px;"></div>
 
     <div id="menu">
         <div class="input-group">
@@ -212,15 +221,20 @@
                 <line x1="140" y1="90" x2="140" y2="160" stroke="#0ff" stroke-width="6" class="part"/>
                 <line x1="140" y1="110" x2="110" y2="140" stroke="#0ff" stroke-width="6" class="part"/>
                 <line x1="140" y1="110" x2="170" y2="140" stroke="#0ff" stroke-width="6" class="part"/>
-                <line x1="140" y1="160" x2="120" y2="200" stroke="#0ff" stroke-width="6" class="part"/>
+                <line x1="140" y1="160" y2="120" y2="200" stroke="#0ff" stroke-width="6" class="part"/>
                 <line x1="140" y1="160" x2="160" y2="200" stroke="#0ff" stroke-width="6" class="part"/>
             </svg>
         </div>
 
         <div class="word" id="word"></div>
         <div id="message">Wrong Guesses Left: 6</div>
+        <div id="rematchMessage"></div>
+
 
         <div class="keyboard" id="keyboard"></div>
+
+        <button class="btn" id="rematchBtn" style="margin-top: 15px; display: none;" onclick="promptRematch()">Rematch</button>
+        <button class="btn" style="margin-top: 25px;" onclick="location.reload()">Exit Game</button>
 
         <div id="chatBox"></div>
         <div class="chat-input-group">
@@ -228,8 +242,6 @@
                    onkeypress="if(event.key==='Enter')sendMessage()">
             <button class="btn" onclick="sendMessage()">Send</button>
         </div>
-        
-        <button class="btn" style="margin-top: 25px;" onclick="location.reload()">New Game</button>
     </div>
 </div>
 
@@ -251,6 +263,7 @@
 
     let gameCode = "";
     let isHost = false;
+    let myRole = "Guest"; // Determined on join/create
     const MAX_WRONGS = 6;
 
     // Utility for adding system messages to the chat box
@@ -273,8 +286,8 @@
         gameCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         document.getElementById("code").value = gameCode;
         isHost = true;
+        myRole = "Host";
 
-        // Use prompt for word input
         const word = prompt("HOST: Enter the word for the game (3-12 letters, A-Z only):")?.trim().toUpperCase();
         if (!word || !/^[A-Z]{3,12}$/.test(word)) {
             alert("Creation cancelled. Invalid word! Must be 3-12 letters (A-Z only).");
@@ -282,20 +295,24 @@
         }
 
         const joinPassword = document.getElementById("password").value.trim();
+        const initialTurn = Math.random() < 0.5 ? "Host" : "Guest";
+        const nextStarter = initialTurn === "Host" ? "Guest" : "Host";
         
         const gameRef = db.collection("games").doc(gameCode);
         
-        // Host sets the initial state, including the new 'attempts' array
+        // Host sets the initial state, including the new 'turn' and 'nextStarter' fields
         gameRef.set({
             word: word,
             joinPassword: joinPassword || null,
             guessed: Array(word.length).fill(false),
             wrongs: 0,
-            attempts: [], // Array to track all tried letters (hit or miss)
+            attempts: [],
+            turn: initialTurn, // Randomly assigned starter
+            nextStarter: nextStarter, // Player who starts the potential rematch
             status: "playing",
-            messages: [{ text: "New game created. Start guessing!", sender: "System", time: Date.now() }]
+            messages: [{ text: `New game created. ${initialTurn} guesses first!`, sender: "System", time: Date.now() }]
         }).then(() => {
-            let shareMessage = "Game Created! Share this with your friend:\n\nCode: " + gameCode;
+            let shareMessage = `Game Created! You are the Host. Share this:\n\nCode: ${gameCode}\nStarter: ${initialTurn}`;
             if (joinPassword) {
                  shareMessage += "\nPassword: " + joinPassword;
             }
@@ -314,6 +331,7 @@
         const attemptPassword = document.getElementById("password").value.trim();
         
         isHost = false;
+        myRole = "Guest";
         const gameRef = db.collection("games").doc(gameCode);
 
         gameRef.get().then(doc => {
@@ -327,7 +345,7 @@
             }
             
             if (data.status === "playing" || data.status === "won" || data.status === "lost") {
-                addChat("You have joined the game!");
+                addChat("You have joined the game as a Guest!");
                 startGame();
             } else {
                  alert(`Cannot join game. Current status: ${data.status}`);
@@ -342,6 +360,7 @@
     function startGame() {
         document.getElementById("menu").style.display = "none";
         document.getElementById("gameArea").style.display = "block";
+        document.getElementById("playerRole").innerHTML = `Role: <strong>${myRole}</strong> | Game Code: <strong>${gameCode}</strong>`;
 
         const gameRef = db.collection("games").doc(gameCode);
 
@@ -358,6 +377,58 @@
             document.getElementById("message").innerHTML = "Connection Error. Check console.";
         });
     }
+    
+    // --- Rematch Logic ---
+    
+    function promptRematch() {
+        // Only Host can trigger this
+        if (!isHost) return; 
+
+        const newWord = prompt("HOST: Enter the word for the REMATCH (3-12 letters, A-Z only):")?.trim().toUpperCase();
+        if (!newWord || !/^[A-Z]{3,12}$/.test(newWord)) {
+            alert("Rematch cancelled. Invalid word! Must be 3-12 letters (A-Z only).");
+            return;
+        }
+        
+        // Call the function to reset the game state
+        startRematch(newWord);
+    }
+    
+    async function startRematch(newWord) {
+        // 1. Get current data to determine the next starting player
+        const gameRef = db.collection("games").doc(gameCode);
+        const doc = await gameRef.get();
+        const d = doc.data();
+
+        // The next starter is stored in d.nextStarter
+        const currentStarter = d.nextStarter; 
+        
+        // The new next starter is the opposite player (alternating)
+        const newNextStarter = currentStarter === 'Host' ? 'Guest' : 'Host'; 
+        
+        // 2. Reset the game document
+        await gameRef.update({
+            word: newWord,
+            guessed: Array(newWord.length).fill(false),
+            wrongs: 0,
+            attempts: [],
+            turn: currentStarter, // Start the new game with the designated player
+            nextStarter: newNextStarter, // Prepare for the game after this one
+            status: "playing",
+            messages: firebase.firestore.FieldValue.arrayUnion({
+                text: `REMATCH! New word set. It is ${currentStarter}'s turn to guess first.`,
+                sender: "System",
+                time: Date.now()
+            })
+        }).then(() => {
+            addChat(`Rematch started! It is ${currentStarter}'s turn.`);
+        }).catch(error => {
+            console.error("Error starting rematch:", error);
+            alert("Failed to start rematch.");
+        });
+    }
+
+    // --- Game Update Logic ---
 
     function updateGame(data) {
         // 1. Word Display
@@ -388,44 +459,73 @@
         const attemptedLetters = data.attempts || []; 
         const kb = document.getElementById("keyboard");
         kb.innerHTML = "";
+        const canGuess = !isGameOver && data.turn === myRole;
+
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(l => {
             const btn = document.createElement("button");
             btn.className = "key";
             btn.textContent = l;
             btn.onclick = () => guess(l);
             
-            // Disable key if game is over OR if the letter has already been attempted (hit or miss)
-            if (isGameOver || attemptedLetters.includes(l)) {
+            // Disable key if game is over, letter already attempted, OR if it's not this player's turn
+            if (isGameOver || attemptedLetters.includes(l) || !canGuess) {
                 btn.disabled = true;
             }
             
             kb.appendChild(btn);
         });
 
-        // 4. Win/Lose Message 
+        // 4. Win/Lose/Turn Message 
         const messageEl = document.getElementById("message");
         if (wordSolved) {
-            messageEl.innerHTML = "🎉 <strong>WINNER!</strong> The word was: <strong>" + data.word + "</strong>";
-            messageEl.style.color = "#0f0";
+            messageEl.innerHTML = "🎉 <strong style='color:var(--neon-green)'>WINNER!</strong> The word was: <strong>" + data.word + "</strong>";
+            messageEl.style.color = "var(--neon-green)";
         } else if (data.wrongs >= MAX_WRONGS) {
-            messageEl.innerHTML = `💀 <strong>Game Over!</strong><br>Word was: <span style="color:#f00; font-weight:bold;">${data.word}</span>`;
-            messageEl.style.color = "#f00";
+            messageEl.innerHTML = `💀 <strong style='color:var(--neon-red)'>Game Over!</strong><br>Word was: <span style="color:var(--neon-red); font-weight:bold;">${data.word}</span>`;
+            messageEl.style.color = "var(--neon-red)";
         } else {
-            messageEl.innerHTML = `Wrong Guesses Left: ${MAX_WRONGS - data.wrongs}`;
+            // Display whose turn it is
+            const turnText = (data.turn === myRole) ? 
+                "<span style='color: #ff0'>YOUR TURN TO GUESS!</span>" : 
+                `Waiting for <span style='color: #ff0'>${data.turn}</span> to guess...`;
+                
+            messageEl.innerHTML = `Wrong Guesses Left: ${MAX_WRONGS - data.wrongs}<br>${turnText}`;
             messageEl.style.color = "var(--neon-color)";
+        }
+        
+        // 5. Rematch Button and Logic
+        const rematchBtn = document.getElementById("rematchBtn");
+        const rematchMsg = document.getElementById("rematchMessage");
+
+        if (isGameOver) {
+            if (isHost) {
+                rematchBtn.style.display = 'inline-block';
+                rematchMsg.innerHTML = "Click Rematch to start a new round!";
+            } else {
+                rematchBtn.style.display = 'none';
+                rematchMsg.innerHTML = "Waiting for Host to start the next round...";
+            }
+        } else {
+            rematchBtn.style.display = 'none';
+            rematchMsg.innerHTML = "";
         }
     }
 
     function guess(letter) {
-        // Only the Host makes database updates for the guess
-        if (!isHost) {
-            addChat("You are the Guest. Only the Host can register guesses.");
-            return;
-        }
-
         const gameRef = db.collection("games").doc(gameCode);
         gameRef.get().then(doc => {
             const d = doc.data();
+            
+            // Determine the current player's role (Host or Guest)
+            // Note: Only the Host has write permission here, but both players can check the turn.
+            
+            // 1. Check if it's this player's turn (Only the Host will execute the update, but both check permission)
+            if (d.turn !== myRole) {
+                addChat(`It is not your turn! Waiting for ${d.turn}.`);
+                return;
+            }
+            
+            // 2. Basic game state checks
             if (d.status !== "playing") {
                 addChat("Game is over. Cannot guess.");
                 return;
@@ -456,19 +556,23 @@
             let newStatus = "playing";
             if (newGuessed.every(Boolean)) newStatus = "won";
             else if (newWrongs >= MAX_WRONGS) newStatus = "lost";
+            
+            // 3. Determine next turn (always switch)
+            const nextTurn = d.turn === 'Host' ? 'Guest' : 'Host';
 
-            // Update database state
+            // 4. Update database state
             gameRef.update({ 
                 guessed: newGuessed, 
                 wrongs: newWrongs,
                 status: newStatus,
-                attempts: newAttempts // Updated attempts array
+                attempts: newAttempts,
+                turn: nextTurn // <--- TURN SWITCHED
             });
             
-            // Send system chat message about the guess
+            // 5. Send system chat message about the guess
             db.collection("games").doc(gameCode).update({
                 messages: firebase.firestore.FieldValue.arrayUnion({
-                    text: `Host guessed: ${letter}. Result: ${found ? 'Hit' : 'Miss'}`,
+                    text: `${myRole} guessed: ${letter}. Result: ${found ? 'Hit' : 'Miss'}`,
                     sender: "System",
                     time: Date.now()
                 })
@@ -489,7 +593,7 @@
         db.collection("games").doc(gameCode).update({
             messages: firebase.firestore.FieldValue.arrayUnion({
                 text: text,
-                sender: isHost ? "Host" : "Guest",
+                sender: myRole,
                 time: Date.now()
             })
         }).then(() => {
