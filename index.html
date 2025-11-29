@@ -285,12 +285,13 @@
         
         const gameRef = db.collection("games").doc(gameCode);
         
-        // Host sets the initial state
+        // Host sets the initial state, including the new 'attempts' array
         gameRef.set({
             word: word,
             joinPassword: joinPassword || null,
             guessed: Array(word.length).fill(false),
             wrongs: 0,
+            attempts: [], // Array to track all tried letters (hit or miss)
             status: "playing",
             messages: [{ text: "New game created. Start guessing!", sender: "System", time: Date.now() }]
         }).then(() => {
@@ -321,7 +322,6 @@
             }
             const data = doc.data();
 
-            // Check for password requirement
             if (data.joinPassword && data.joinPassword !== attemptPassword) {
                 return alert("Incorrect Join Password!");
             }
@@ -345,7 +345,6 @@
 
         const gameRef = db.collection("games").doc(gameCode);
 
-        // Listen to game state for real-time synchronization
         gameRef.onSnapshot(doc => {
             if (!doc.exists) {
                 document.getElementById("message").innerHTML = "Game disconnected or deleted!";
@@ -369,7 +368,6 @@
         for (let i = 0; i < data.word.length; i++) {
             const s = document.createElement("span");
             s.className = "letter";
-            // Show letter if guessed OR if game is over
             if (data.guessed[i] || data.wrongs >= MAX_WRONGS || wordSolved) {
                 s.textContent = data.word[i];
             } else {
@@ -386,7 +384,8 @@
         // Check game status
         const isGameOver = data.wrongs >= MAX_WRONGS || wordSolved;
 
-        // 3. Keyboard
+        // 3. Keyboard (Uses attempts array for reliable disabling)
+        const attemptedLetters = data.attempts || []; 
         const kb = document.getElementById("keyboard");
         kb.innerHTML = "";
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(l => {
@@ -395,11 +394,8 @@
             btn.textContent = l;
             btn.onclick = () => guess(l);
             
-            // Check if letter has been correctly guessed
-            const isGuessedCorrectly = data.word.includes(l) && data.guessed.some((g,j) => g && data.word[j]===l);
-
-            // Disable key if game is over OR if letter has been correctly guessed
-            if (isGameOver || isGuessedCorrectly) {
+            // Disable key if game is over OR if the letter has already been attempted (hit or miss)
+            if (isGameOver || attemptedLetters.includes(l)) {
                 btn.disabled = true;
             }
             
@@ -437,11 +433,12 @@
 
             let newGuessed = d.guessed.slice();
             let newWrongs = d.wrongs;
-            let found = false;
+            let newAttempts = d.attempts || [];
 
-            // Check if letter was already guessed correctly
-            const alreadyGuessed = d.word.includes(letter) && d.guessed.some((g,j) => g && d.word[j]===l);
-            if (alreadyGuessed) return;
+            // Check if letter was already attempted (prevents duplicate attempts)
+            if (newAttempts.includes(letter)) return;
+
+            let found = false;
 
             for (let i = 0; i < d.word.length; i++) {
                 if (d.word[i] === letter) {
@@ -454,6 +451,8 @@
                 newWrongs++;
             }
             
+            newAttempts.push(letter); // Add the letter to the attempts array regardless of outcome
+            
             let newStatus = "playing";
             if (newGuessed.every(Boolean)) newStatus = "won";
             else if (newWrongs >= MAX_WRONGS) newStatus = "lost";
@@ -462,7 +461,8 @@
             gameRef.update({ 
                 guessed: newGuessed, 
                 wrongs: newWrongs,
-                status: newStatus 
+                status: newStatus,
+                attempts: newAttempts // Updated attempts array
             });
             
             // Send system chat message about the guess
@@ -504,7 +504,6 @@
         const box = document.getElementById("chatBox");
         box.innerHTML = "";
         
-        // Sort and display messages
         messages.sort((a, b) => a.time - b.time).forEach(m => {
             const div = document.createElement("div");
             
