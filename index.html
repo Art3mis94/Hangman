@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Neon Hangman Online</title>
+<style>
+  body { margin:0; height:100vh; background:#0f0f1e; color:#0ff; font-family:'Segoe UI',sans-serif; 
+         display:flex; justify-content:center; align-items:center; overflow:hidden; }
+  .game { width:90%; max-width:500px; text-align:center; padding:2rem; background:rgba(20,20,40,0.9); 
+          border-radius:20px; box-shadow:0 0 50px #0ff; display:flex; flex-direction:column; align-items:center; }
+  h1 { margin:0 0 1rem; font-size:2.8rem; text-shadow:0 0 20px #0ff; }
+  h2 { margin:1rem 0 0.5rem; font-size:2rem; text-shadow:0 0 15px #0ff; }
+  input, button { font-family:inherit; }
+  #code { padding:1rem; font-size:1.5rem; width:200px; text-align:center; background:#000; border:2px solid #0ff; 
+          color:#0ff; border-radius:12px; box-shadow:0 0 20px #0ff; margin:1rem 0; text-transform:uppercase; }
+  .btn { background:#0ff; color:#000; padding:1rem 2rem; font-size:1.4rem; border:none; border-radius:12px; 
+         cursor:pointer; margin:0.5rem; box-shadow:0 0 25px #0ff; font-weight:bold; }
+  .btn:hover { transform:scale(1.05); }
+  .hangman { width:180px; height:220px; margin:2rem auto; }
+  svg { width:100%; height:100%; }
+  .word { font-size:3rem; letter-spacing:0.6rem; margin:1rem 0; font-weight:bold; }
+  .letter { display:inline-block; min-width:45px; text-align:center; }
+  #message { font-size:1.8rem; min-height:3rem; margin:1rem 0; }
+  .keyboard { display:flex; flex-wrap:wrap; justify-content:center; gap:9px; margin:1.5rem 0; max-width:420px; }
+  .key { background:none; border:2px solid #0ff; color:#0ff; width:48px; height:48px; border-radius:12px; 
+         font-size:1.5rem; cursor:pointer; box-shadow:0 0 15px #0ff; font-weight:bold; }
+  .key:hover:not(:disabled) { background:#0ff; color:#000; }
+  .key:disabled { opacity:0.4; }
+  .part { display:none; }
+  #menu, #gameArea { width:100%; }
+  #gameArea { display:none; }
+</style>
+</head>
+<body>
+
+<div class="game">
+  <h1>Neon Hangman Online</h1>
+
+  <div id="menu">
+    <h2>Multiplayer</h2>
+    <input type="text" id="code" placeholder="GAME CODE" maxlength="6">
+    <br>
+    <button class="btn" onclick="createGame()">Create Game</button>
+    <button class="btn" onclick="joinGame()">Join Game</button>
+  </div>
+
+  <div id="gameArea">
+    <div class="hangman">
+      <svg viewBox="0 0 200 250">
+        <line x1="20" y1="230" x2="180" y2="230" stroke="#0ff" stroke-width="8"/>
+        <line x1="50" y1="230" x2="50" y2="20" stroke="#0ff" stroke-width="8"/>
+        <line x1="50" y1="20" x2="140" y2="20" stroke="#0ff" stroke-width="8"/>
+        <line x1="140" y1="20" x2="140" y2="50" stroke="#0ff" stroke-width="8"/>
+        <circle cx="140" cy="70" r="20" stroke="#0ff" stroke-width="6" fill="none" class="part"/>
+        <line x1="140" y1="90" x2="140" y2="160" stroke="#0ff" stroke-width="6" class="part"/>
+        <line x1="140" y1="110" x2="110" y2="140" stroke="#0ff" stroke-width="6" class="part"/>
+        <line x1="140" y1="110" x2="170" y2="140" stroke="#0ff" stroke-width="6" class="part"/>
+        <line x1="140" y1="160" x2="120" y2="200" stroke="#0ff" stroke-width="6" class="part"/>
+        <line x1="140" y1="160" x2="160" y2="200" stroke="#0ff" stroke-width="6" class="part"/>
+      </svg>
+    </div>
+
+    <div class="word" id="word"></div>
+    <div id="message"></div>
+    <div class="keyboard" id="keyboard"></div>
+    <button class="btn" onclick="location.reload()">New Game</button>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+<script>
+const firebaseConfig = {
+  {
+  apiKey: "AIzaSyCEYmvhNMeI5GtkjBagq0XDhaa049yqKYU",
+  authDomain: "hangman-b5477.firebaseapp.com",
+  projectId: "hangman-b5477",
+  storageBucket: "hangman-b5477.firebasestorage.app",
+  messagingSenderId: "659695148674",
+  appId: "1:659695148674:web:a538354378ed8dddec5e9b",
+  measurementId: "G-9N6C60EHH0"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+let gameCode, myRole, word = "", guessed = [], wrongs = 0;
+
+function createGame() {
+  gameCode = Math.random().toString(36).substring(2,8).toUpperCase();
+  document.getElementById("code").value = gameCode;
+  alert("Share this code with your friend:\n\n" + gameCode);
+  myRole = "creator";
+  startGame();
+}
+
+function joinGame() {
+  gameCode = document.getElementById("code").value.trim().toUpperCase();
+  if (gameCode.length !== 6) return alert("Enter a 6-letter code!");
+  myRole = "guesser";
+  startGame();
+}
+
+function startGame() {
+  document.getElementById("menu").style.display = "none";
+  document.getElementById("gameArea").style.display = "block";
+
+  const docRef = db.collection("games").doc(gameCode);
+
+  if (myRole === "creator") {
+    docRef.set({ status: "waiting", created: Date.now() });
+  }
+
+  docRef.onSnapshot(snap => {
+    if (!snap.exists) return alert("Game not found or expired");
+    const data = snap.data();
+
+    if (myRole === "guesser" && !data.word) {
+      const w = prompt("Enter the secret word (3–12 letters):")?.trim().toUpperCase();
+      if (/^[A-Z]{3,12}$/.test(w)) {
+        docRef.update({ word: w, status: "playing", wrongs: 0, guessed: [] });
+      } else alert("Invalid word!");
+      return;
+    }
+
+    if (data.word) {
+      word = data.word;
+      guessed = data.guessed || Array(word.length).fill(false);
+      wrongs = data.wrongs || 0;
+
+      renderWord();
+      renderKeyboard();
+      updateHangman();
+
+      if (guessed.every(g => g)) {
+        document.getElementById("message").innerHTML = "GUESSER WINS!";
+        disableKeyboard();
+      } else if (wrongs >= 6) {
+        document.getElementById("message").innerHTML = `CREATOR WINS!<br>Word was: <span style="color:#0f0">${word}</span>`;
+        disableKeyboard();
+      }
+    }
+  });
+}
+
+function renderWord() {
+  const div = document.getElementById("word");
+  div.innerHTML = "";
+  for (let i=0; i<word.length; i++) {
+    const s = document.createElement("span");
+    s.className = "letter";
+    s.textContent = guessed[i] ? word[i] : "_";
+    div.appendChild(s);
+  }
+}
+
+function renderKeyboard() {
+  const kb = document.getElementById("keyboard");
+  kb.innerHTML = "";
+  for (let c of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+    const btn = document.createElement("button");
+    btn.className = "key";
+    btn.textContent = c;
+    btn.onclick = () => makeGuess(c);
+    kb.appendChild(btn);
+  }
+}
+
+function makeGuess(letter) {
+  if (myRole !== "creator") return;
+  const btn = event.target;
+  btn.disabled = true;
+
+  let found = false;
+  for (let i=0; i<word.length; i++) {
+    if (word[i] === letter) { guessed[i] = true; found = true; }
+  }
+
+  if (!found) wrongs++;
+
+  db.collection("games").doc(gameCode).update({
+    guessed: guessed,
+    wrongs: wrongs
+  });
+
+  if (found) btn.style.background = "#0f0";
+  else btn.style.borderColor = btn.style.color = "#f06";
+}
+
+function updateHangman() {
+  document.querySelectorAll(".part").forEach((p, i) => {
+    p.style.display = i < wrongs ? "block" : "none";
+  });
+}
+
+function disableKeyboard() {
+  document.querySelectorAll(".key").forEach(b => b.disabled = true);
+}
+</script>
+</body>
+</html>
