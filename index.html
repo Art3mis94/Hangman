@@ -283,7 +283,7 @@
 
     <div id="gameArea">
         <div class="hangman">
-            <!-- Hangman SVG Drawing (6 parts: Head, Body, Arms, Legs) -->
+            <!-- Hangman SVG Drawing (6 parts: Head, Body, Arms, Legs) - Fixed Legs -->
             <svg viewBox="0 0 200 250">
                 <line x1="20" y1="230" x2="180" y2="230" stroke="#0ff" stroke-width="8"/>
                 <line x1="50" y1="230" x2="50" y2="20" stroke="#0ff" stroke-width="8"/>
@@ -295,9 +295,7 @@
                 <line x1="140" y1="90" x2="140" y2="160" stroke="#0ff" stroke-width="6" class="part"/>
                 <line x1="140" y1="110" x2="110" y2="140" stroke="#0ff" stroke-width="6" class="part"/>
                 <line x1="140" y1="110" x2="170" y2="140" stroke="#0ff" stroke-width="6" class="part"/>
-                <!-- Left Leg (Fixed coordinates) -->
                 <line x1="140" y1="160" x2="120" y2="200" stroke="#0ff" stroke-width="6" class="part"/>
-                <!-- Right Leg (Fixed coordinates) -->
                 <line x1="140" y1="160" x2="160" y2="200" stroke="#0ff" stroke-width="6" class="part"/>
             </svg>
         </div>
@@ -430,8 +428,8 @@
             
             wordSetterRole = data.wordSetter || "Host";
             
-            if (data.status === "playing" || data.status === "won" || data.status === "lost") {
-                addChat(`You have joined the game as the Guest. ${wordSetterRole} set the word.`);
+            if (data.status === "playing" || data.status === "won" || data.status === "lost" || data.status === "setting_word") {
+                addChat(`You have joined the game as the Guest. ${wordSetterRole} is the current word setter.`);
                 startGame();
             } else {
                  alert(`Cannot join game. Current status: ${data.status}`);
@@ -457,7 +455,7 @@
             }
             const data = doc.data();
             wordSetterRole = data.wordSetter || "Host";
-            if (data.word) updateGame(data);
+            updateGame(data);
             if (data.messages) updateChat(data.messages);
         }, error => {
             console.error("Firestore snapshot listener failed:", error);
@@ -468,6 +466,7 @@
     // --- Rematch Modal & Logic ---
     
     function showRematchModal() {
+        // Only the initial Host (myRole === 'Host') can show the modal
         if (myRole === 'Host') {
             document.getElementById('rematchModal').style.display = 'flex';
         }
@@ -480,56 +479,89 @@
     function selectRematchRole(newSetter) {
         hideRematchModal();
         
-        let promptMessage;
-        
-        // Only prompt the current device if it's the one setting the word.
-        if (myRole === newSetter) {
-             promptMessage = `${myRole} (Word Setter): Enter the word for the REMATCH (3-12 letters, A-Z only):`;
-        } else {
-            promptMessage = `${newSetter} is the new Word Setter. Please pass the device to ${newSetter} to enter the word now.`;
-        }
-
-        const newWord = prompt(promptMessage)?.trim().toUpperCase();
-
-        if (!newWord || !/^[A-Z]{3,12}$/.test(newWord)) {
-            alert("Rematch cancelled. Invalid word! Must be 3-12 letters (A-Z only).");
-            return;
-        }
-        
-        startRematch(newWord, newSetter);
-    }
-    
-    async function startRematch(newWord, nextWordSetter) {
         const gameRef = db.collection("games").doc(gameCode);
         
-        // Reset the game document
-        await gameRef.update({
-            word: newWord,
-            guessed: Array(newWord.length).fill(false),
+        // Host initiates the state change, setting the new setter and status
+        // The word will be cleared (null) and the status set to "setting_word"
+        gameRef.update({
+            word: null, // Clear the word
+            guessed: [],
             wrongs: 0,
             attempts: [],
-            wordSetter: nextWordSetter, // Store the new word setter
-            status: "playing",
+            wordSetter: newSetter,
+            status: "setting_word", // New status: waiting for the word
             messages: firebase.firestore.FieldValue.arrayUnion({
-                text: `REMATCH! ${nextWordSetter} set the new word.`,
+                text: `REMATCH initiated. ${newSetter} is the next Word Setter. Waiting for them to choose the word.`,
                 sender: "System",
                 time: Date.now()
             })
-        }).then(() => {
-            addChat(`Rematch started! ${nextWordSetter} is the new Word Setter.`);
         }).catch(error => {
-            console.error("Error starting rematch:", error);
-            alert("Failed to start rematch.");
+            console.error("Error initiating rematch:", error);
+            alert("Failed to initiate rematch.");
         });
+    }
+    
+    // Function triggered only on the Setter's device when status is "setting_word"
+    function setRematchWord(currentSetter) {
+        // Use a slight delay to ensure the UI updates before the blocking prompt
+        setTimeout(() => {
+            const newWord = prompt(`${myRole} (Word Setter): Enter the word for the REMATCH (3-12 letters, A-Z only):`)?.trim().toUpperCase();
+
+            if (!newWord || !/^[A-Z]{3,12}$/.test(newWord)) {
+                alert("Word setting cancelled. Please click Rematch again to restart the process.");
+                return;
+            }
+            
+            // Update the DB with the word and switch status to playing
+            db.collection("games").doc(gameCode).update({
+                word: newWord,
+                guessed: Array(newWord.length).fill(false),
+                status: "playing",
+                messages: firebase.firestore.FieldValue.arrayUnion({
+                    text: `${currentSetter} has set the word. Game is now playing!`,
+                    sender: "System",
+                    time: Date.now()
+                })
+            });
+        }, 100); 
     }
 
     // --- Game Update Logic ---
 
     function updateGame(data) {
-        // 1. Word Display
+        
+        const messageEl = document.getElementById("message");
+        document.getElementById("rematchBtn").style.display = 'none';
+        document.getElementById("rematchMessage").innerHTML = "";
+        document.getElementById("keyboard").innerHTML = "";
+
+        // 1. NEW: Handle Word Setting phase
+        if (data.status === "setting_word") {
+            const currentSetter = data.wordSetter;
+            
+            // Clear word display during setup
+            document.getElementById("word").innerHTML = "___"; 
+            document.querySelectorAll(".part").forEach(p => p.style.display = "none");
+
+            if (myRole === currentSetter) {
+                // This device is the chosen Setter
+                messageEl.innerHTML = `You are the <strong style='color: var(--neon-yellow)'>Word Setter</strong>. Please enter the new word now.`;
+                setRematchWord(currentSetter); // Trigger the prompt
+            } else {
+                // This device is the Guesser, waiting for the Setter
+                messageEl.innerHTML = `Waiting for <strong style='color: var(--neon-yellow)'>${currentSetter}</strong> to set the word...`;
+            }
+            messageEl.style.color = "var(--neon-yellow)";
+            return; // EXIT updateGame, waiting for word to be set
+        }
+
+        // --- Standard Playing/Game Over Logic Starts Here ---
+
+        // 2. Word Display
         const w = document.getElementById("word");
         w.innerHTML = "";
         const wordSolved = data.guessed.every(Boolean);
+        const isGameOver = data.wrongs >= MAX_WRONGS || wordSolved;
 
         for (let i = 0; i < data.word.length; i++) {
             const s = document.createElement("span");
@@ -542,18 +574,14 @@
             w.appendChild(s);
         }
 
-        // 2. Hangman Drawing
+        // 3. Hangman Drawing
         document.querySelectorAll(".part").forEach((p, i) => {
             p.style.display = i < data.wrongs ? "block" : "none";
         });
         
-        // Check game status
-        const isGameOver = data.wrongs >= MAX_WRONGS || wordSolved;
-
-        // 3. Keyboard (Added color feedback)
+        // 4. Keyboard
         const attemptedLetters = data.attempts || []; 
         const kb = document.getElementById("keyboard");
-        kb.innerHTML = "";
         
         const isGuesser = myRole !== wordSetterRole;
 
@@ -583,8 +611,7 @@
             kb.appendChild(btn);
         });
 
-        // 4. Win/Lose/Status Message 
-        const messageEl = document.getElementById("message");
+        // 5. Win/Lose/Status Message 
         
         if (wordSolved) {
             messageEl.innerHTML = `🎉 <strong style='color:var(--neon-green)'>WINNER!</strong><br>The word was: <strong>${data.word}</strong>`;
@@ -602,29 +629,17 @@
             messageEl.style.color = "var(--neon-color)";
         }
         
-        // 5. Rematch Button Visibility
-        const rematchBtn = document.getElementById("rematchBtn");
-        const rematchMsg = document.getElementById("rematchMessage");
-
-        // Only the initial Host (myRole === 'Host') gets the button to initiate rematch options
-        if (isGameOver) {
-            if (myRole === 'Host') {
-                rematchBtn.style.display = 'inline-block';
-                rematchMsg.innerHTML = "Click Rematch to set the next round's roles and word.";
-            } else {
-                rematchBtn.style.display = 'none';
-                rematchMsg.innerHTML = "Waiting for Host to start the next round...";
-            }
-        } else {
-            rematchBtn.style.display = 'none';
-            rematchMsg.innerHTML = "";
+        // 6. Rematch Button Visibility (Only Host sees the button)
+        if (isGameOver && myRole === 'Host') {
+            document.getElementById("rematchBtn").style.display = 'inline-block';
+            document.getElementById("rematchMessage").innerHTML = "Click Rematch to set the next round's roles and word.";
+        } else if (isGameOver) {
+            document.getElementById("rematchMessage").innerHTML = "Waiting for Host to start the next round...";
         }
     }
 
     function guess(letter) {
         if (myRole === wordSetterRole) {
-            // This is a safety check; the button should be disabled via updateGame logic
-            addChat("You are the Word Setter for this round. You cannot guess.");
             return;
         }
 
