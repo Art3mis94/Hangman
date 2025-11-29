@@ -143,12 +143,24 @@
             cursor: pointer;
             box-shadow: 0 0 15px var(--neon-color);
             font-weight: bold;
-            transition: background 0.1s, color 0.1s;
+            transition: background 0.1s, color 0.1s, border-color 0.1s, box-shadow 0.1s;
         }
 
         .key:hover:not(:disabled) {
             background: var(--neon-color);
             color: #000;
+        }
+        
+        /* Key Colors */
+        .key.correct {
+            border-color: var(--neon-green);
+            color: var(--neon-green);
+            box-shadow: 0 0 15px var(--neon-green);
+        }
+        .key.incorrect {
+            border-color: var(--neon-red);
+            color: var(--neon-red);
+            box-shadow: 0 0 15px var(--neon-red);
         }
 
         .key:disabled {
@@ -239,7 +251,7 @@
 
         <div class="keyboard" id="keyboard"></div>
 
-        <button class="btn" id="rematchBtn" style="margin-top: 15px; display: none;" onclick="promptRematch()">Rematch (Set New Word)</button>
+        <button class="btn" id="rematchBtn" style="margin-top: 15px; display: none;" onclick="promptRematch()">Rematch</button>
         <button class="btn" style="margin-top: 25px;" onclick="location.reload()">Exit Game</button>
 
         <div id="chatBox"></div>
@@ -268,8 +280,9 @@
     const db = firebase.firestore();
 
     let gameCode = "";
-    let myRole = "Unknown"; // 'Host' (Setter) or 'Guest' (Guesser)
+    let myRole = "Unknown"; // 'Host' (Setter/Initial Creator) or 'Guest' (Guesser/Joiner)
     const MAX_WRONGS = 6;
+    let wordSetterRole = "Host"; // Who is currently setting the word
 
     // Utility for adding system messages to the chat box
     function addChat(text) {
@@ -290,7 +303,8 @@
     function createGame() {
         gameCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         document.getElementById("code").value = gameCode;
-        myRole = "Host"; // Host sets the word
+        myRole = "Host";
+        wordSetterRole = "Host"; // Host sets the first word
 
         const word = prompt("HOST (Word Setter): Enter the word for the game (3-12 letters, A-Z only):")?.trim().toUpperCase();
         if (!word || !/^[A-Z]{3,12}$/.test(word)) {
@@ -302,17 +316,17 @@
         
         const gameRef = db.collection("games").doc(gameCode);
         
-        // Host sets the initial state. No 'turn' needed.
         gameRef.set({
             word: word,
             joinPassword: joinPassword || null,
             guessed: Array(word.length).fill(false),
             wrongs: 0,
             attempts: [], // Array to track all tried letters (hit or miss)
+            wordSetter: wordSetterRole, // Tracks who set the current word
             status: "playing",
-            messages: [{ text: "New game created. Waiting for Guest to guess...", sender: "System", time: Date.now() }]
+            messages: [{ text: `New game created by Host. Host is the word setter.`, sender: "System", time: Date.now() }]
         }).then(() => {
-            let shareMessage = `Game Created! You are the Host (Word Setter). Share this:\n\nCode: ${gameCode}`;
+            let shareMessage = `Game Created! You are the Host (Initial Creator). You set the word this round.\n\nCode: ${gameCode}`;
             if (joinPassword) {
                  shareMessage += "\nPassword: " + joinPassword;
             }
@@ -330,7 +344,7 @@
 
         const attemptPassword = document.getElementById("password").value.trim();
         
-        myRole = "Guest"; // Guest guesses the word
+        myRole = "Guest";
         const gameRef = db.collection("games").doc(gameCode);
 
         gameRef.get().then(doc => {
@@ -343,8 +357,11 @@
                 return alert("Incorrect Join Password!");
             }
             
+            // Set the wordSetterRole based on the data in Firestore
+            wordSetterRole = data.wordSetter || "Host";
+            
             if (data.status === "playing" || data.status === "won" || data.status === "lost") {
-                addChat("You have joined the game as the Guest (Guesser)!");
+                addChat(`You have joined the game as the Guest. ${wordSetterRole} set the word.`);
                 startGame();
             } else {
                  alert(`Cannot join game. Current status: ${data.status}`);
@@ -369,6 +386,7 @@
                 return;
             }
             const data = doc.data();
+            wordSetterRole = data.wordSetter || "Host"; // Update setter role on snapshot
             if (data.word) updateGame(data);
             if (data.messages) updateChat(data.messages);
         }, error => {
@@ -377,22 +395,37 @@
         });
     }
     
-    // --- Rematch Logic (Host must set the new word) ---
+    // --- Rematch Logic (Allows Host to choose who sets the next word) ---
     
     function promptRematch() {
-        // Only Host can trigger this
+        // Only the initial Host (myRole === 'Host') can trigger this prompt
         if (myRole !== 'Host') return; 
 
-        const newWord = prompt("HOST: Enter the word for the REMATCH (3-12 letters, A-Z only):")?.trim().toUpperCase();
+        const shouldSetWord = confirm("Do you (Host) want to set the word for the next round? \n\nPress OK to set the word yourself. \nPress CANCEL to have the Guest set the word.");
+        
+        let newWordSetter;
+        let promptMessage;
+
+        if (shouldSetWord) {
+            newWordSetter = "Host";
+            promptMessage = "HOST: Enter the word for the REMATCH (3-12 letters, A-Z only):";
+        } else {
+            newWordSetter = "Guest";
+            promptMessage = "GUEST will set the word. Please pass the device to the Guest, who will enter the word now.";
+            // We still prompt the Host's device, but the message tells them to pass it.
+        }
+
+        const newWord = prompt(promptMessage)?.trim().toUpperCase();
+
         if (!newWord || !/^[A-Z]{3,12}$/.test(newWord)) {
             alert("Rematch cancelled. Invalid word! Must be 3-12 letters (A-Z only).");
             return;
         }
         
-        startRematch(newWord);
+        startRematch(newWord, newWordSetter);
     }
     
-    async function startRematch(newWord) {
+    async function startRematch(newWord, nextWordSetter) {
         const gameRef = db.collection("games").doc(gameCode);
         
         // Reset the game document
@@ -401,14 +434,15 @@
             guessed: Array(newWord.length).fill(false),
             wrongs: 0,
             attempts: [],
+            wordSetter: nextWordSetter, // Store the new word setter
             status: "playing",
             messages: firebase.firestore.FieldValue.arrayUnion({
-                text: "REMATCH! New word set. Guest, please make your guess.",
+                text: `REMATCH! ${nextWordSetter} set the new word.`,
                 sender: "System",
                 time: Date.now()
             })
         }).then(() => {
-            addChat("Rematch started! Guest can now guess.");
+            addChat(`Rematch started! ${nextWordSetter} is the new Word Setter.`);
         }).catch(error => {
             console.error("Error starting rematch:", error);
             alert("Failed to start rematch.");
@@ -426,7 +460,6 @@
         for (let i = 0; i < data.word.length; i++) {
             const s = document.createElement("span");
             s.className = "letter";
-            // Show letters if guessed, or if game is over
             if (data.guessed[i] || data.wrongs >= MAX_WRONGS || wordSolved) {
                 s.textContent = data.word[i];
             } else {
@@ -443,13 +476,13 @@
         // Check game status
         const isGameOver = data.wrongs >= MAX_WRONGS || wordSolved;
 
-        // 3. Keyboard (Host disabled, Guest enabled unless game over or key attempted)
+        // 3. Keyboard (Added color feedback)
         const attemptedLetters = data.attempts || []; 
         const kb = document.getElementById("keyboard");
         kb.innerHTML = "";
         
-        // Only the Guest can guess, and only if the game is not over
-        const canGuess = myRole === 'Guest' && !isGameOver;
+        // Determine the role for this round: Guesser is the opposite of the Setter
+        const isGuesser = myRole !== wordSetterRole;
 
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(l => {
             const btn = document.createElement("button");
@@ -457,12 +490,22 @@
             btn.textContent = l;
             btn.onclick = () => guess(l);
             
+            // Apply color based on attempt status
+            if (attemptedLetters.includes(l)) {
+                // Check if the attempted letter is in the word
+                if (data.word.includes(l)) {
+                    btn.classList.add('correct');
+                } else {
+                    btn.classList.add('incorrect');
+                }
+                btn.disabled = true; // Always disable if attempted
+            }
+            
             // Disable key if:
-            // 1. Player is the Host (Word Setter)
+            // 1. Player is the Word Setter (Cannot guess)
             // 2. Game is over
-            // 3. Letter has already been attempted
-            // 4. Player is the Guest but the game is not active (redundant, but safe)
-            if (myRole === 'Host' || isGameOver || attemptedLetters.includes(l) || (myRole === 'Guest' && data.status !== 'playing')) {
+            // 3. (Already handled by attemptedLetters check)
+            if (!isGuesser || isGameOver) {
                 btn.disabled = true;
             }
             
@@ -471,19 +514,21 @@
 
         // 4. Win/Lose/Status Message 
         const messageEl = document.getElementById("message");
+        const guesserRole = wordSetterRole === 'Host' ? 'Guest' : 'Host';
+        
         if (wordSolved) {
-            messageEl.innerHTML = "🎉 <strong style='color:var(--neon-green)'>WINNER!</strong> The word was: <strong>" + data.word + "</strong>";
+            messageEl.innerHTML = `🎉 <strong style='color:var(--neon-green)'>WINNER!</strong><br>The word was: <strong>${data.word}</strong>`;
             messageEl.style.color = "var(--neon-green)";
         } else if (data.wrongs >= MAX_WRONGS) {
             messageEl.innerHTML = `💀 <strong style='color:var(--neon-red)'>Game Over!</strong><br>Word was: <span style="color:var(--neon-red); font-weight:bold;">${data.word}</span>`;
             messageEl.style.color = "var(--neon-red)";
         } else {
             // Display whose turn/role it is
-            const roleMessage = (myRole === 'Host') ? 
-                "<span style='color: var(--neon-yellow)'>You are the Word Setter. Waiting for Guest...</span>" : 
-                "<span style='color: var(--neon-yellow)'>YOUR TURN TO GUESS!</span>";
+            const instruction = (myRole === wordSetterRole) ? 
+                `You are the <span style='color: var(--neon-yellow)'>Word Setter</span>.` : 
+                `You are the <span style='color: var(--neon-yellow)'>Guesser</span>. Start guessing!`;
                 
-            messageEl.innerHTML = `Wrong Guesses Left: ${MAX_WRONGS - data.wrongs}<br>${roleMessage}`;
+            messageEl.innerHTML = `Wrong Guesses Left: ${MAX_WRONGS - data.wrongs}<br>${instruction}`;
             messageEl.style.color = "var(--neon-color)";
         }
         
@@ -491,13 +536,14 @@
         const rematchBtn = document.getElementById("rematchBtn");
         const rematchMsg = document.getElementById("rematchMessage");
 
+        // Only the initial Host (myRole === 'Host') gets the button
         if (isGameOver) {
             if (myRole === 'Host') {
                 rematchBtn.style.display = 'inline-block';
-                rematchMsg.innerHTML = "Click Rematch to set a new word!";
+                rematchMsg.innerHTML = "Click Rematch to set the next round's roles and word.";
             } else {
                 rematchBtn.style.display = 'none';
-                rematchMsg.innerHTML = "Waiting for Host to set the word for the next round...";
+                rematchMsg.innerHTML = "Waiting for Host to start the next round...";
             }
         } else {
             rematchBtn.style.display = 'none';
@@ -506,9 +552,9 @@
     }
 
     function guess(letter) {
-        // Enforce: Only the Guest is allowed to trigger a guess and write to the database.
-        if (myRole !== 'Guest') {
-            addChat("Only the Guest (Guesser) can make guesses.");
+        // Enforce: Only the designated Guesser can trigger a guess.
+        if (myRole === wordSetterRole) {
+            addChat("You are the Word Setter for this round. You cannot guess.");
             return;
         }
 
@@ -525,11 +571,9 @@
             let newWrongs = d.wrongs;
             let newAttempts = d.attempts || [];
 
-            // Check if letter was already attempted (prevents duplicate attempts)
-            if (newAttempts.includes(letter)) return;
+            if (newAttempts.includes(letter)) return; // Should be disabled, but safety check
 
             let found = false;
-
             for (let i = 0; i < d.word.length; i++) {
                 if (d.word[i] === letter) {
                     newGuessed[i] = true;
@@ -541,7 +585,7 @@
                 newWrongs++;
             }
             
-            newAttempts.push(letter); // Add the letter to the attempts array
+            newAttempts.push(letter);
             
             let newStatus = "playing";
             if (newGuessed.every(Boolean)) newStatus = "won";
@@ -555,21 +599,12 @@
                 attempts: newAttempts
             });
             
-            // Send system chat message about the guess
-            db.collection("games").doc(gameCode).update({
-                messages: firebase.firestore.FieldValue.arrayUnion({
-                    text: `${myRole} guessed: ${letter}. Result: ${found ? 'Hit' : 'Miss'}`,
-                    sender: "System",
-                    time: Date.now()
-                })
-            });
-
         }).catch(error => {
              console.error("Error processing guess:", error);
         });
     }
 
-    // --- Chat Functions ---
+    // --- Chat Functions (Unchanged) ---
 
     function sendMessage() {
         const input = document.getElementById("chatInput");
@@ -600,9 +635,9 @@
             div.textContent = `[${m.sender}]: ${m.text}`;
             
             if (m.sender === "Host") {
-                div.style.color = "var(--neon-yellow)"; // Yellow
+                div.style.color = "var(--neon-yellow)";
             } else if (m.sender === "System") {
-                div.style.color = "#f0f"; // Magenta
+                div.style.color = "#f0f";
             }
             
             box.appendChild(div);
