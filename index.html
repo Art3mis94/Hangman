@@ -17,6 +17,7 @@
             --shadow: 0 0 30px var(--neon-color);
             --neon-green: #0f0;
             --neon-red: #f00;
+            --neon-yellow: #ff0;
         }
 
         body {
@@ -82,8 +83,13 @@
             transition: transform 0.1s;
         }
 
-        .btn:hover {
+        .btn:hover:not(:disabled) {
             transform: scale(1.05);
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: default;
         }
 
         .hangman svg {
@@ -203,8 +209,8 @@
             <input type="password" id="password" placeholder="JOIN PASSWORD (Optional)" maxlength="20">
         </div>
         
-        <button class="btn" onclick="createGame()">Create Game</button>
-        <button class="btn" onclick="joinGame()">Join Game</button>
+        <button class="btn" onclick="createGame()">Create Game (Set Word)</button>
+        <button class="btn" onclick="joinGame()">Join Game (Guess Word)</button>
     </div>
 
     <div id="gameArea">
@@ -233,7 +239,7 @@
 
         <div class="keyboard" id="keyboard"></div>
 
-        <button class="btn" id="rematchBtn" style="margin-top: 15px; display: none;" onclick="promptRematch()">Rematch</button>
+        <button class="btn" id="rematchBtn" style="margin-top: 15px; display: none;" onclick="promptRematch()">Rematch (Set New Word)</button>
         <button class="btn" style="margin-top: 25px;" onclick="location.reload()">Exit Game</button>
 
         <div id="chatBox"></div>
@@ -262,8 +268,7 @@
     const db = firebase.firestore();
 
     let gameCode = "";
-    let isHost = false;
-    let myRole = "Guest"; // Determined on join/create
+    let myRole = "Unknown"; // 'Host' (Setter) or 'Guest' (Guesser)
     const MAX_WRONGS = 6;
 
     // Utility for adding system messages to the chat box
@@ -285,34 +290,29 @@
     function createGame() {
         gameCode = Math.random().toString(36).substring(2, 8).toUpperCase();
         document.getElementById("code").value = gameCode;
-        isHost = true;
-        myRole = "Host";
+        myRole = "Host"; // Host sets the word
 
-        const word = prompt("HOST: Enter the word for the game (3-12 letters, A-Z only):")?.trim().toUpperCase();
+        const word = prompt("HOST (Word Setter): Enter the word for the game (3-12 letters, A-Z only):")?.trim().toUpperCase();
         if (!word || !/^[A-Z]{3,12}$/.test(word)) {
             alert("Creation cancelled. Invalid word! Must be 3-12 letters (A-Z only).");
             return;
         }
 
         const joinPassword = document.getElementById("password").value.trim();
-        const initialTurn = Math.random() < 0.5 ? "Host" : "Guest";
-        const nextStarter = initialTurn === "Host" ? "Guest" : "Host";
         
         const gameRef = db.collection("games").doc(gameCode);
         
-        // Host sets the initial state, including the new 'turn' and 'nextStarter' fields
+        // Host sets the initial state. No 'turn' needed.
         gameRef.set({
             word: word,
             joinPassword: joinPassword || null,
             guessed: Array(word.length).fill(false),
             wrongs: 0,
-            attempts: [],
-            turn: initialTurn, // Randomly assigned starter
-            nextStarter: nextStarter, // Player who starts the potential rematch
+            attempts: [], // Array to track all tried letters (hit or miss)
             status: "playing",
-            messages: [{ text: `New game created. ${initialTurn} guesses first!`, sender: "System", time: Date.now() }]
+            messages: [{ text: "New game created. Waiting for Guest to guess...", sender: "System", time: Date.now() }]
         }).then(() => {
-            let shareMessage = `Game Created! You are the Host. Share this:\n\nCode: ${gameCode}\nStarter: ${initialTurn}`;
+            let shareMessage = `Game Created! You are the Host (Word Setter). Share this:\n\nCode: ${gameCode}`;
             if (joinPassword) {
                  shareMessage += "\nPassword: " + joinPassword;
             }
@@ -330,8 +330,7 @@
 
         const attemptPassword = document.getElementById("password").value.trim();
         
-        isHost = false;
-        myRole = "Guest";
+        myRole = "Guest"; // Guest guesses the word
         const gameRef = db.collection("games").doc(gameCode);
 
         gameRef.get().then(doc => {
@@ -345,7 +344,7 @@
             }
             
             if (data.status === "playing" || data.status === "won" || data.status === "lost") {
-                addChat("You have joined the game as a Guest!");
+                addChat("You have joined the game as the Guest (Guesser)!");
                 startGame();
             } else {
                  alert(`Cannot join game. Current status: ${data.status}`);
@@ -378,11 +377,11 @@
         });
     }
     
-    // --- Rematch Logic ---
+    // --- Rematch Logic (Host must set the new word) ---
     
     function promptRematch() {
         // Only Host can trigger this
-        if (!isHost) return; 
+        if (myRole !== 'Host') return; 
 
         const newWord = prompt("HOST: Enter the word for the REMATCH (3-12 letters, A-Z only):")?.trim().toUpperCase();
         if (!newWord || !/^[A-Z]{3,12}$/.test(newWord)) {
@@ -390,38 +389,26 @@
             return;
         }
         
-        // Call the function to reset the game state
         startRematch(newWord);
     }
     
     async function startRematch(newWord) {
-        // 1. Get current data to determine the next starting player
         const gameRef = db.collection("games").doc(gameCode);
-        const doc = await gameRef.get();
-        const d = doc.data();
-
-        // The next starter is stored in d.nextStarter
-        const currentStarter = d.nextStarter; 
         
-        // The new next starter is the opposite player (alternating)
-        const newNextStarter = currentStarter === 'Host' ? 'Guest' : 'Host'; 
-        
-        // 2. Reset the game document
+        // Reset the game document
         await gameRef.update({
             word: newWord,
             guessed: Array(newWord.length).fill(false),
             wrongs: 0,
             attempts: [],
-            turn: currentStarter, // Start the new game with the designated player
-            nextStarter: newNextStarter, // Prepare for the game after this one
             status: "playing",
             messages: firebase.firestore.FieldValue.arrayUnion({
-                text: `REMATCH! New word set. It is ${currentStarter}'s turn to guess first.`,
+                text: "REMATCH! New word set. Guest, please make your guess.",
                 sender: "System",
                 time: Date.now()
             })
         }).then(() => {
-            addChat(`Rematch started! It is ${currentStarter}'s turn.`);
+            addChat("Rematch started! Guest can now guess.");
         }).catch(error => {
             console.error("Error starting rematch:", error);
             alert("Failed to start rematch.");
@@ -439,6 +426,7 @@
         for (let i = 0; i < data.word.length; i++) {
             const s = document.createElement("span");
             s.className = "letter";
+            // Show letters if guessed, or if game is over
             if (data.guessed[i] || data.wrongs >= MAX_WRONGS || wordSolved) {
                 s.textContent = data.word[i];
             } else {
@@ -455,11 +443,13 @@
         // Check game status
         const isGameOver = data.wrongs >= MAX_WRONGS || wordSolved;
 
-        // 3. Keyboard (Uses attempts array for reliable disabling)
+        // 3. Keyboard (Host disabled, Guest enabled unless game over or key attempted)
         const attemptedLetters = data.attempts || []; 
         const kb = document.getElementById("keyboard");
         kb.innerHTML = "";
-        const canGuess = !isGameOver && data.turn === myRole;
+        
+        // Only the Guest can guess, and only if the game is not over
+        const canGuess = myRole === 'Guest' && !isGameOver;
 
         "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").forEach(l => {
             const btn = document.createElement("button");
@@ -467,15 +457,19 @@
             btn.textContent = l;
             btn.onclick = () => guess(l);
             
-            // Disable key if game is over, letter already attempted, OR if it's not this player's turn
-            if (isGameOver || attemptedLetters.includes(l) || !canGuess) {
+            // Disable key if:
+            // 1. Player is the Host (Word Setter)
+            // 2. Game is over
+            // 3. Letter has already been attempted
+            // 4. Player is the Guest but the game is not active (redundant, but safe)
+            if (myRole === 'Host' || isGameOver || attemptedLetters.includes(l) || (myRole === 'Guest' && data.status !== 'playing')) {
                 btn.disabled = true;
             }
             
             kb.appendChild(btn);
         });
 
-        // 4. Win/Lose/Turn Message 
+        // 4. Win/Lose/Status Message 
         const messageEl = document.getElementById("message");
         if (wordSolved) {
             messageEl.innerHTML = "🎉 <strong style='color:var(--neon-green)'>WINNER!</strong> The word was: <strong>" + data.word + "</strong>";
@@ -484,26 +478,26 @@
             messageEl.innerHTML = `💀 <strong style='color:var(--neon-red)'>Game Over!</strong><br>Word was: <span style="color:var(--neon-red); font-weight:bold;">${data.word}</span>`;
             messageEl.style.color = "var(--neon-red)";
         } else {
-            // Display whose turn it is
-            const turnText = (data.turn === myRole) ? 
-                "<span style='color: #ff0'>YOUR TURN TO GUESS!</span>" : 
-                `Waiting for <span style='color: #ff0'>${data.turn}</span> to guess...`;
+            // Display whose turn/role it is
+            const roleMessage = (myRole === 'Host') ? 
+                "<span style='color: var(--neon-yellow)'>You are the Word Setter. Waiting for Guest...</span>" : 
+                "<span style='color: var(--neon-yellow)'>YOUR TURN TO GUESS!</span>";
                 
-            messageEl.innerHTML = `Wrong Guesses Left: ${MAX_WRONGS - data.wrongs}<br>${turnText}`;
+            messageEl.innerHTML = `Wrong Guesses Left: ${MAX_WRONGS - data.wrongs}<br>${roleMessage}`;
             messageEl.style.color = "var(--neon-color)";
         }
         
-        // 5. Rematch Button and Logic
+        // 5. Rematch Button Visibility
         const rematchBtn = document.getElementById("rematchBtn");
         const rematchMsg = document.getElementById("rematchMessage");
 
         if (isGameOver) {
-            if (isHost) {
+            if (myRole === 'Host') {
                 rematchBtn.style.display = 'inline-block';
-                rematchMsg.innerHTML = "Click Rematch to start a new round!";
+                rematchMsg.innerHTML = "Click Rematch to set a new word!";
             } else {
                 rematchBtn.style.display = 'none';
-                rematchMsg.innerHTML = "Waiting for Host to start the next round...";
+                rematchMsg.innerHTML = "Waiting for Host to set the word for the next round...";
             }
         } else {
             rematchBtn.style.display = 'none';
@@ -512,20 +506,16 @@
     }
 
     function guess(letter) {
+        // Enforce: Only the Guest is allowed to trigger a guess and write to the database.
+        if (myRole !== 'Guest') {
+            addChat("Only the Guest (Guesser) can make guesses.");
+            return;
+        }
+
         const gameRef = db.collection("games").doc(gameCode);
         gameRef.get().then(doc => {
             const d = doc.data();
             
-            // Determine the current player's role (Host or Guest)
-            // Note: Only the Host has write permission here, but both players can check the turn.
-            
-            // 1. Check if it's this player's turn (Only the Host will execute the update, but both check permission)
-            if (d.turn !== myRole) {
-                addChat(`It is not your turn! Waiting for ${d.turn}.`);
-                return;
-            }
-            
-            // 2. Basic game state checks
             if (d.status !== "playing") {
                 addChat("Game is over. Cannot guess.");
                 return;
@@ -551,25 +541,21 @@
                 newWrongs++;
             }
             
-            newAttempts.push(letter); // Add the letter to the attempts array regardless of outcome
+            newAttempts.push(letter); // Add the letter to the attempts array
             
             let newStatus = "playing";
             if (newGuessed.every(Boolean)) newStatus = "won";
             else if (newWrongs >= MAX_WRONGS) newStatus = "lost";
-            
-            // 3. Determine next turn (always switch)
-            const nextTurn = d.turn === 'Host' ? 'Guest' : 'Host';
 
-            // 4. Update database state
+            // Update database state
             gameRef.update({ 
                 guessed: newGuessed, 
                 wrongs: newWrongs,
                 status: newStatus,
-                attempts: newAttempts,
-                turn: nextTurn // <--- TURN SWITCHED
+                attempts: newAttempts
             });
             
-            // 5. Send system chat message about the guess
+            // Send system chat message about the guess
             db.collection("games").doc(gameCode).update({
                 messages: firebase.firestore.FieldValue.arrayUnion({
                     text: `${myRole} guessed: ${letter}. Result: ${found ? 'Hit' : 'Miss'}`,
@@ -614,7 +600,7 @@
             div.textContent = `[${m.sender}]: ${m.text}`;
             
             if (m.sender === "Host") {
-                div.style.color = "#ff0"; // Yellow
+                div.style.color = "var(--neon-yellow)"; // Yellow
             } else if (m.sender === "System") {
                 div.style.color = "#f0f"; // Magenta
             }
