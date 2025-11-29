@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <title>Neon Hangman Online</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
     <style>
         /* --- CSS Styles --- */
         :root {
@@ -23,7 +25,8 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            overflow: hidden;
+            overflow: auto; /* Allow scrolling for small mobile screens */
+            padding: 20px 0;
         }
 
         .game-container {
@@ -44,8 +47,9 @@
 
         .input-group input {
             padding: 14px;
-            font-size: 1.8rem;
-            width: 200px;
+            font-size: 1.2rem; /* Adjusted for better mobile input */
+            width: 90%;
+            max-width: 300px;
             text-align: center;
             background: #000;
             border: 3px solid var(--neon-color);
@@ -53,16 +57,20 @@
             border-radius: 15px;
             box-shadow: 0 0 25px var(--neon-color);
             text-transform: uppercase;
-            margin: 15px 0;
+            margin: 8px 0;
             outline: none;
+        }
+        
+        .input-group input[type="password"] {
+            text-transform: none; /* Keep password lowercase/case-sensitive */
         }
 
         .btn {
             background: var(--neon-color);
             color: #000;
-            padding: 14px 30px;
-            margin: 10px;
-            font-size: 1.5rem;
+            padding: 14px 25px;
+            margin: 8px;
+            font-size: 1.4rem;
             border: none;
             border-radius: 15px;
             cursor: pointer;
@@ -82,8 +90,8 @@
         }
 
         .word {
-            font-size: 3.8rem;
-            letter-spacing: 0.8rem;
+            font-size: 3rem;
+            letter-spacing: 0.6rem;
             margin: 20px 0;
             font-weight: bold;
             min-height: 50px;
@@ -91,31 +99,32 @@
 
         .letter {
             display: inline-block;
-            min-width: 50px;
+            min-width: 30px;
         }
 
         #message {
-            font-size: 1.7rem;
+            font-size: 1.6rem;
             min-height: 50px;
             margin: 15px 0;
+            color: var(--text-color);
         }
 
         .keyboard {
             display: flex;
             flex-wrap: wrap;
             justify-content: center;
-            gap: 8px;
+            gap: 6px;
             margin: 25px 0;
         }
 
         .key {
-            width: 44px;
-            height: 44px;
+            width: 40px;
+            height: 40px;
             background: none;
             border: 3px solid var(--neon-color);
             color: var(--text-color);
-            border-radius: 14px;
-            font-size: 1.5rem;
+            border-radius: 10px;
+            font-size: 1.4rem;
             cursor: pointer;
             box-shadow: 0 0 15px var(--neon-color);
             font-weight: bold;
@@ -164,6 +173,7 @@
             color: var(--text-color);
             border-radius: 12px;
             font-size: 1rem;
+            outline: none;
         }
         
         .part { display: none; }
@@ -180,7 +190,6 @@
     <div id="menu">
         <div class="input-group">
             <input type="text" id="code" placeholder="GAME CODE" maxlength="6">
-            <br>
             <input type="password" id="password" placeholder="JOIN PASSWORD (Optional)" maxlength="20">
         </div>
         
@@ -190,11 +199,13 @@
 
     <div id="gameArea">
         <div class="hangman">
+            <!-- Hangman SVG Drawing (6 parts) -->
             <svg viewBox="0 0 200 250">
                 <line x1="20" y1="230" x2="180" y2="230" stroke="#0ff" stroke-width="8"/>
                 <line x1="50" y1="230" x2="50" y2="20" stroke="#0ff" stroke-width="8"/>
                 <line x1="50" y1="20" x2="140" y2="20" stroke="#0ff" stroke-width="8"/>
                 <line x1="140" y1="20" x2="140" y2="50" stroke="#0ff" stroke-width="8"/>
+                <!-- Parts 0-5 (Head, Body, Arms, Legs) -->
                 <circle cx="140" cy="70" r="20" stroke="#0ff" stroke-width="6" fill="none" class="part"/>
                 <line x1="140" y1="90" x2="140" y2="160" stroke="#0ff" stroke-width="6" class="part"/>
                 <line x1="140" y1="110" x2="110" y2="140" stroke="#0ff" stroke-width="6" class="part"/>
@@ -205,7 +216,7 @@
         </div>
 
         <div class="word" id="word"></div>
-        <div id="message"></div>
+        <div id="message">Wrong Guesses Left: 6</div>
 
         <div class="keyboard" id="keyboard"></div>
 
@@ -220,16 +231,14 @@
     </div>
 </div>
 
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
-
 <script>
     /* --- JavaScript Logic --- */
+    // Firebase configuration provided by the environment
     const firebaseConfig = {
       apiKey: "AIzaSyCEYmvhNMeI5GtkjBagq0XDhaa049yqKYU",
       authDomain: "hangman-b5477.firebaseapp.com",
       projectId: "hangman-b5477",
-      storageBucket: "hangman-b5477.firebaseapp.com", // Corrected storageBucket format
+      storageBucket: "hangman-b5477.firebaseapp.com",
       messagingSenderId: "659695148674",
       appId: "1:659695148674:web:a538354378ed8dddec5e9b"
     };
@@ -240,6 +249,17 @@
 
     let gameCode = "";
     let isHost = false;
+    const MAX_WRONGS = 6;
+
+    // Utility for adding system messages to the chat box
+    function addChat(text) {
+        const box = document.getElementById("chatBox");
+        const div = document.createElement("div");
+        div.textContent = `[System]: ${text}`;
+        div.style.color = "#f0f";
+        box.appendChild(div);
+        box.scrollTop = box.scrollHeight;
+    }
 
     // --- Core Game Functions ---
 
@@ -248,25 +268,21 @@
         document.getElementById("code").value = gameCode;
         isHost = true;
 
-        const word = prompt("Enter the word to guess (3-12 letters only):")?.trim().toUpperCase();
+        const word = prompt("Enter the word to guess (3-12 letters, A-Z only):")?.trim().toUpperCase();
         if (!/^[A-Z]{3,12}$/.test(word)) {
-            alert("Invalid word! Must be 3-12 letters.");
+            alert("Invalid word! Must be 3-12 letters (A-Z only).");
             location.reload();
             return;
         }
 
         const joinPassword = document.getElementById("password").value.trim();
-        if (joinPassword.length > 20) {
-            alert("Password too long.");
-            return;
-        }
-
+        
         const gameRef = db.collection("games").doc(gameCode);
         
-        // Host sets the initial state including the password (if provided)
+        // Host sets the initial state
         gameRef.set({
             word: word,
-            joinPassword: joinPassword || null, // Store null if not set
+            joinPassword: joinPassword || null, // Store password if provided
             guessed: Array(word.length).fill(false),
             wrongs: 0,
             status: "playing",
@@ -295,25 +311,20 @@
 
         gameRef.get().then(doc => {
             if (!doc.exists) {
-                return alert("Game code not found.");
+                return alert("Game code not found. Make sure the Host created it.");
             }
             const data = doc.data();
 
-            // 🔑 Check for password requirement
+            // Check for password requirement
             if (data.joinPassword && data.joinPassword !== attemptPassword) {
                 return alert("Incorrect Join Password!");
             }
             
-            // Allow joining without password if Host didn't set one
-            if (!data.joinPassword && attemptPassword) {
-                 // Guest supplied password but Host did not require one
-            }
-
-            if (data.status === "playing" || data.status === "waiting") {
-                addChat("You have joined the game!");
+            if (data.status === "playing" || data.status === "won" || data.status === "lost") {
+                addChat("You have joined the active game!");
                 startGame();
             } else {
-                 alert(`Cannot join game. Status is: ${data.status}`);
+                 alert(`Cannot join game. Current status: ${data.status}`);
             }
 
         }).catch(error => {
@@ -328,7 +339,7 @@
 
         const gameRef = db.collection("games").doc(gameCode);
 
-        // Listen to game state
+        // Listen to game state for real-time synchronization
         gameRef.onSnapshot(doc => {
             if (!doc.exists) {
                 document.getElementById("message").innerHTML = "Game disconnected or deleted!";
@@ -350,7 +361,7 @@
             const s = document.createElement("span");
             s.className = "letter";
             // Show letter if guessed OR if game is over (loss)
-            if (data.guessed[i] || data.wrongs >= 6 || wordSolved) {
+            if (data.guessed[i] || data.wrongs >= MAX_WRONGS || wordSolved) {
                 s.textContent = data.word[i];
             } else {
                 s.textContent = "_";
@@ -364,7 +375,7 @@
         });
         
         // Check game status
-        const isGameOver = data.wrongs >= 6 || wordSolved;
+        const isGameOver = data.wrongs >= MAX_WRONGS || wordSolved;
 
         // 3. Keyboard
         const kb = document.getElementById("keyboard");
@@ -375,30 +386,39 @@
             btn.textContent = l;
             btn.onclick = () => guess(l);
             
-            let isGuessed = data.word.includes(l) ? data.guessed.some((g,j) => g && data.word[j]===l) : false;
+            // Check if letter has been correctly guessed
+            const isGuessedCorrectly = data.word.includes(l) && data.guessed.some((g,j) => g && data.word[j]===l);
+            
+            // Check if letter has been missed (optional: we aren't tracking wrong letters, only wrong count)
+            const hasBeenAttempted = isGuessedCorrectly || data.messages.some(m => m.text.includes(`guessed ${l}`));
 
-            // Disable key if game is over or if letter was already guessed/attempted
-            if (isGameOver || isGuessed) {
+            // Disable key if game is over OR if letter has been correctly guessed
+            if (isGameOver || isGuessedCorrectly || data.wrongs >= MAX_WRONGS) {
                 btn.disabled = true;
             }
             
-            // Optional: You could track wrong attempts separately to style keys differently
+            // You could add logic here to disable keys that resulted in a wrong guess, 
+            // but that would require storing a separate array of wrong letters.
 
             kb.appendChild(btn);
         });
 
-        // 4. Win/Lose Message
+        // 4. Win/Lose Message (FIXED: Using <strong> for bolding)
+        const messageEl = document.getElementById("message");
         if (wordSolved) {
-            document.getElementById("message").innerHTML = "🎉 **WINNER!** The word was: **" + data.word + "**";
-        } else if (data.wrongs >= 6) {
-            document.getElementById("message").innerHTML = `💀 Game Over!<br>Word was: <span style="color:#f00">${data.word}</span>`;
+            messageEl.innerHTML = "🎉 <strong>WINNER!</strong> The word was: <strong>" + data.word + "</strong>";
+            messageEl.style.color = "#0f0"; // Green for win
+        } else if (data.wrongs >= MAX_WRONGS) {
+            messageEl.innerHTML = `💀 <strong>Game Over!</strong><br>Word was: <span style="color:#f00; font-weight:bold;">${data.word}</span>`;
+            messageEl.style.color = "#f00"; // Red for loss
         } else {
-            document.getElementById("message").innerHTML = `Wrong Guesses Left: ${6 - data.wrongs}`;
+            messageEl.innerHTML = `Wrong Guesses Left: ${MAX_WRONGS - data.wrongs}`;
+            messageEl.style.color = var(--neon-color); // Default neon color
         }
     }
 
     function guess(letter) {
-        // 🚨 IMPORTANT: Only the Host makes database updates for the guess to prevent conflicts
+        // Only the Host makes database updates for the guess to prevent conflicts
         if (!isHost) {
             addChat("You are the Guest. Only the Host can register guesses.");
             return;
@@ -430,7 +450,7 @@
             
             let newStatus = "playing";
             if (newGuessed.every(Boolean)) newStatus = "won";
-            else if (newWrongs >= 6) newStatus = "lost";
+            else if (newWrongs >= MAX_WRONGS) newStatus = "lost";
 
             // Update database state
             gameRef.update({ 
@@ -438,6 +458,16 @@
                 wrongs: newWrongs,
                 status: newStatus 
             });
+            
+            // Send a system chat message about the guess (optional)
+            db.collection("games").doc(gameCode).update({
+                messages: firebase.firestore.FieldValue.arrayUnion({
+                    text: `${isHost ? 'Host' : 'Guest'} guessed: ${letter}. Result: ${found ? 'Hit' : 'Miss'}`,
+                    sender: "System",
+                    time: Date.now()
+                })
+            });
+
         });
     }
 
@@ -446,7 +476,7 @@
     function sendMessage() {
         const input = document.getElementById("chatInput");
         const text = input.value.trim();
-        if (!text) return;
+        if (!text || gameCode === "") return;
 
         db.collection("games").doc(gameCode).update({
             messages: firebase.firestore.FieldValue.arrayUnion({
@@ -456,35 +486,33 @@
             })
         }).then(() => {
             input.value = "";
+        }).catch(error => {
+            console.error("Error sending message:", error);
+            addChat("Failed to send message.");
         });
     }
 
     function updateChat(messages) {
         const box = document.getElementById("chatBox");
         box.innerHTML = "";
-        messages.forEach(m => {
+        messages.sort((a, b) => a.time - b.time).forEach(m => {
             const div = document.createElement("div");
-            // Highlight Host messages
+            
+            // Format sender name and message
             div.textContent = `[${m.sender}]: ${m.text}`;
+            
             if (m.sender === "Host") {
                 div.style.color = "#ff0"; // Yellow for Host
             } else if (m.sender === "System") {
                 div.style.color = "#f0f"; // Magenta for System alerts
             }
+            // For Guest/regular users, default to the neon text color
+            
             box.appendChild(div);
         });
-        box.scrollTop = box.scrollHeight;
-    }
-
-    function addChat(text) {
-        // Utility for logging system messages locally before DB update
-        const box = document.getElementById("chatBox");
-        const div = document.createElement("div");
-        div.textContent = `[System]: ${text}`;
-        div.style.color = "#f0f";
-        box.appendChild(div);
         box.scrollTop = box.scrollHeight;
     }
 </script>
 </body>
 </html>
+
